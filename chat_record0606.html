@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ambisonizer 项目聊天记录</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f7f4;
+      --paper: #ffffff;
+      --ink: #1f2933;
+      --muted: #667085;
+      --line: #d9dee6;
+      --user: #eef6ff;
+      --assistant: #f5f7f2;
+      --code: #111827;
+    }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+      line-height: 1.65;
+    }
+    main {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 36px 20px 64px;
+    }
+    header {
+      margin-bottom: 28px;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 18px;
+    }
+    h1 {
+      font-size: 30px;
+      margin: 0 0 8px;
+      letter-spacing: 0;
+    }
+    h2 {
+      font-size: 20px;
+      margin: 32px 0 12px;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 6px;
+    }
+    h3 {
+      font-size: 16px;
+      margin: 20px 0 8px;
+    }
+    .note {
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .turn {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      margin: 14px 0;
+      overflow: hidden;
+    }
+    .role {
+      font-weight: 700;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--line);
+    }
+    .user .role { background: var(--user); }
+    .assistant .role { background: var(--assistant); }
+    .body {
+      padding: 14px 16px;
+    }
+    pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #0f172a;
+      color: #e5e7eb;
+      padding: 12px 14px;
+      border-radius: 6px;
+      overflow-x: auto;
+      line-height: 1.5;
+    }
+    code {
+      background: #eef0f4;
+      color: var(--code);
+      border-radius: 4px;
+      padding: 1px 5px;
+      font-family: Consolas, "SFMono-Regular", Menlo, monospace;
+      font-size: 0.95em;
+    }
+    ul {
+      margin-top: 8px;
+    }
+    a {
+      color: #075985;
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Ambisonizer 项目聊天记录</h1>
+    <div class="note">整理时间：2026-06-06。此 HTML 保留本次对话的主要问答、关键结论、链接、路径和代码改动记录；省略了工具调用日志、长文件输出和重复状态更新。</div>
+  </header>
+
+  <h2>1. 项目说明与输入输出</h2>
+  <section class="turn user">
+    <div class="role">用户</div>
+    <div class="body">解释这个项目，说明输入输出。</div>
+  </section>
+  <section class="turn assistant">
+    <div class="role">Codex</div>
+    <div class="body">
+      <p>项目是 <strong>Ambisonizer</strong>，当前代码最初是 <strong>stereo -&gt; FOA WXYZ</strong>。训练输入为双声道 <code>stereo.wav</code>，目标输出为一阶 Ambisonic B-format 的四个通道：</p>
+      <pre>输入: stereo.wav, shape [B, 2, T]
+输出: W.wav / X.wav / Y.wav / Z.wav, shape [B, 4, T]
+采样率: 24000 Hz
+默认长度: 120000 samples, 即 5 秒</pre>
+      <p>模型结构在 <code>model/seanet.py</code> 中：双声道输入先平均成 mono 做主编码，同时双声道 conditioner 提供条件信息，最后 decoder 输出四通道 W/X/Y/Z。</p>
+    </div>
+  </section>
+
+  <h2>2. 原 stereo 数据集设计是否合理</h2>
+  <section class="turn user">
+    <div class="role">用户</div>
+    <div class="body">这个数据集生成合理吗？整体思路有什么问题吗？</div>
+  </section>
+  <section class="turn assistant">
+    <div class="role">Codex</div>
+    <div class="body">
+      <p>结论：工程流程自洽，但作为真实 <code>stereo -&gt; FOA</code> 数据集不够合理。原生成链是：</p>
+      <pre>FOA RIR: W/X/Y/Z
+  -&gt; 固定 ±30° 虚拟扬声器解码成 stereo RIR
+  -&gt; mono clean speech 卷积 stereo RIR 得到输入 stereo.wav
+  -&gt; mono clean speech 卷积原 FOA RIR 得到目标 W/X/Y/Z</pre>
+      <p>主要问题：</p>
+      <ul>
+        <li>2 通道 stereo 无法唯一恢复 4 通道 FOA，是欠定问题。</li>
+        <li>默认 elevation=0 时，Z 通道没有进入输入，模型只能猜。</li>
+        <li>W/X 也不可唯一分离，输入里只有混合项。</li>
+        <li>训练/测试同一合成管线，容易只测试插值能力。</li>
+        <li>train/test split 没有按 room / clean speaker / RIR group 严格隔离，可能泄漏。</li>
+      </ul>
+    </div>
+  </section>
+
+  <h2>3. Binaural -&gt; FOA 的合理性</h2>
+  <section class="turn user">
+    <div class="role">用户</div>
+    <div class="body">如果是 binaural 转 FOA 合理吗？能还原出四声道吗？</div>
+  </section>
+  <section class="turn assistant">
+    <div class="role">Codex</div>
+    <div class="body">
+      <p><strong>binaural -&gt; FOA 比普通 stereo -&gt; FOA 更合理</strong>，因为 binaural 包含 HRTF 线索：</p>
+      <ul>
+        <li>ITD：左右时间差，提供水平方向信息。</li>
+        <li>ILD：左右强度差，提供方向和频率相关线索。</li>
+        <li>耳廓频谱变化：提供 elevation，也就是 Z 相关线索。</li>
+      </ul>
+      <p>但它仍然不是严格可逆：输入只有 L/R 两通道，目标是 W/X/Y/Z 四通道。模型生成的是基于训练数据先验的合理 FOA 估计，不是数学上精确还原。</p>
+    </div>
+  </section>
+
+  <h2>4. 数据集与 HRTF 链接</h2>
+  <section class="turn user">
+    <div class="role">用户</div>
+    <div class="body">TAU-SRIR 数据集下载链接。</div>
+  </section>
+  <section class="turn assistant">
+    <div class="role">Codex</div>
+    <div class="body">
+      <p>TAU-SRIR 官方下载页：</p>
+      <p><a href="https://zenodo.org/records/6408611">https://zenodo.org/records/6408611</a></p>
+      <p>备用镜像：</p>
+      <p><a href="https://huggingface.co/datasets/Fhrozen/tau_srir_db">https://huggingface.co/datasets/Fhrozen/tau_srir_db</a></p>
+    </div>
+  </section>
+
+  <section class="turn user">
+    <div class="role">用户</div>
+    <div class="body">generic HRTF link。</div>
+  </section>
+  <section class="turn assistant">
+    <div class="role">Codex</div>
+    <div class="body">
+      <p>推荐 SOFA 官方数据库入口：</p>
+      <p><a href="https://www.sofaconventions.org/data/database/">https://www.sofaconventions.org/data/database/</a></p>
+      <p>常用数据集：ARI、CIPIC、RIEC、KEMAR/KU100 等。</p>
+    </div>
+  </section>
+
+  <section class="turn user">
+    <div class="role">用户</div>
+    <div class="body">按照我们的任务需不需要下载 HRTF 数据集？如果需要的话，下载哪个比较好？</div>
+  </section>
+  <section class="turn assistant">
+    <div class="role">Codex</div>
+    <div class="body">
+      <p>需要。任务是用 TAU-SRIR 生成 <code>binaural -&gt; FOA</code> 训练集，TAU-SRIR 主要给 FOA RIR，不直接给 binaural RIR，因此需要 HRTF/HRIR 把 FOA RIR 渲染成 binaural RIR。</p>
+      <p>建议：</p>
+      <ul>
+        <li>第一阶段调通 pipeline：KEMAR / FABIAN / KU100。</li>
+        <li>论文主实验：ARI HRTF database，subject 多，SOFA 格式，适合 subject split。</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="turn user">
+    <div class="role">用户</div>
+    <div class="body">KU100 HRIR 这个数据集可以吗？这个能作为最后论文的数据集吗？</div>
+  </section>
+  <section class="turn assistant">
+    <div class="role">Codex</div>
+    <div class="body">
+      <p>KU100 可以用于第一版实验和 baseline，尤其是 full sphere 的 <code>HRIR_L2702.sofa</code>。但不建议作为论文唯一 HRTF，因为它只有一个 dummy head，不能证明跨个体泛化。</p>
+      <p>最终论文建议主数据集用 ARI，KU100 放在 baseline/ablation。</p>
+    </div>
+  </section>
+
+  <section class="turn user">
+    <div class="role">用户</div>
+    <div class="body">给出 ARI 数据集下载链接。下载。</div>
+  </section>
+  <section class="turn assistant">
+    <div class="role">Codex</div>
+    <div class="body">
+      <p>ARI 官方页面：</p>
+      <p><a href="https://www.oeaw.ac.at/en/ari/outreach/software/hrtf-database">https://www.oeaw.ac.at/en/ari/outreach/software/hrtf-database</a></p>
+      <p>SOFA 官方 ARI 数据目录：</p>
+      <p><a href="https://www.sofacoustics.org/data/database/ari/">https://www.sofacoustics.org/data/database/ari/</a></p>
+      <p>曾下载主 <code>hrtf_nh*.sofa</code> 文件集合，记录为 97 个文件，总大小约 274 MB。后续用户指定 HRTF 路径为：</p>
+      <pre>/home/cxw/B2FOA/ambisonizer-main5/hrtf/ari</pre>
+    </div>
+  </section>
+
+  <h2>5. Flow Matching 讨论</h2>
+  <section class="turn user">
+    <div class="role">用户</div>
+    <div class="body">这个网络现在是什么？如果想用 Flow Matching 可以把这个网络加到哪里？</div>
+  </section>
+  <section class="turn assistant">
+    <div class="role">Codex</div>
+    <div class="body">
+      <p>当前网络本质是 <strong>条件 SEANet U-Net + Transformer + VAE 风格条件分支</strong>，一次前向直接回归 WXYZ。</p>
+      <p>Flow Matching 可改为 conditional velocity network：</p>
+      <pre>训练:
+y = target WXYZ
+z = random noise
+t ~ Uniform(0, 1)
+x_t = (1 - t) * z + t * y
+target_velocity = y - z
+pred_velocity = model(x_t, t, condition)</pre>
+      <p>结构上要加 4 通道 <code>x_t</code> encoder 和 time embedding，decoder 输出 velocity WXYZ。更稳的做法是先做 Flow Matching refiner。</p>
+    </div>
+  </section>
+
+  <h2>6. 将项目改为 binaural -&gt; FOA</h2>
+  <section class="turn user">
+    <div class="role">用户</div>
+    <div class="body">能不能改一下这个项目，改成 binaural -&gt; FOA，并且改一下 tau_srir_pipeline。</div>
+  </section>
+  <section class="turn assistant">
+    <div class="role">Codex</div>
+    <div class="body">
+      <p>已完成主要改动：</p>
+      <ul>
+        <li>新增 <code>tau_srir_pipeline/03_generate_binaural_rirs.py</code>：用 SOFA HRTF 将 TAU FOA RIR 渲染成 <code>binaural.wav/L.wav/R.wav</code>。</li>
+        <li>修改 <code>00_run_all.py</code>：流程改为 FOA RIR -&gt; binaural RIR -&gt; EARS binaural audio + FOA target。</li>
+        <li>修改 <code>04_generate_ears_stereo_audio_train_test.py</code>：生成 <code>binaural.wav</code> 作为模型输入，目标仍是 <code>W/X/Y/Z</code>。</li>
+        <li>修改 <code>datasets.py</code>：优先读取 <code>binaural.wav</code>，兼容旧 <code>stereo.wav</code>。</li>
+        <li>修改 <code>train.py</code>：默认数据目录改为 <code>/home/cxw/B2FOA/EARS_tau_srir_binaural</code>。</li>
+        <li>修改 <code>batch_inference2_and_synthesize.py</code>：推理优先找 <code>binaural.wav</code>。</li>
+        <li>更新 <code>README.md</code>。</li>
+        <li>增加依赖 <code>netCDF4==1.6.5</code>。</li>
+      </ul>
+      <p>新的数据结构：</p>
+      <pre>EARS_tau_srir_binaural/
+  train/&lt;sample_id&gt;/
+    binaural.wav
+    W.wav
+    X.wav
+    Y.wav
+    Z.wav
+  test/&lt;sample_id&gt;/
+    binaural.wav
+    W.wav
+    X.wav
+    Y.wav
+    Z.wav</pre>
+    </div>
+  </section>
+
+  <section class="turn user">
+    <div class="role">用户</div>
+    <div class="body"><code>/home/cxw/B2FOA/ambisonizer-main5\hrtf\ari</code> 路径是这个，直接写到程序里。</div>
+  </section>
+  <section class="turn assistant">
+    <div class="role">Codex</div>
+    <div class="body">
+      <p>默认 HRTF 路径已写入程序：</p>
+      <pre>tau_srir_pipeline/03_generate_binaural_rirs.py
+HRTF_DIR = "/home/cxw/B2FOA/ambisonizer-main5/hrtf/ari"</pre>
+      <p>README 同步更新。后来全局搜索确认 <code>ambisonizer-main5</code> 出现在：</p>
+      <pre>README.md:33
+README.md:41
+tau_srir_pipeline/03_generate_binaural_rirs.py:14</pre>
+    </div>
+  </section>
+
+  <h2>7. 当前项目状态解释</h2>
+  <section class="turn user">
+    <div class="role">用户</div>
+    <div class="body">现在的项目是 stereo 生成 WXYZ 的 FOA？解释现在这个项目。</div>
+  </section>
+  <section class="turn assistant">
+    <div class="role">Codex</div>
+    <div class="body">
+      <p>最初是 stereo -&gt; WXYZ。修改后当前项目是：</p>
+      <pre>输入: binaural.wav, 2 通道
+输出: W.wav / X.wav / Y.wav / Z.wav, FOA 四通道</pre>
+      <p>总 pipeline：</p>
+      <pre>01_extract_split_tau_srir.py
+02_generate_foa_rirs.py
+03_generate_binaural_rirs.py
+04_generate_ears_stereo_audio_train_test.py</pre>
+      <p>训练输入张量是 <code>[B, 2, T]</code>，目标张量是 <code>[B, 4, T]</code>，模型结构无需大改，因为 binaural 仍是两通道条件输入。</p>
+    </div>
+  </section>
+
+  <h2>8. BRIR / FOA RIR 听起来没声音的问题</h2>
+  <section class="turn user">
+    <div class="role">用户</div>
+    <div class="body">现在的这个根本就没有声音 input_binaural。生成的 binaural 就没声音，是因为 HRTF 没有归一化吗？现在 BRIR 还是没有声音。</div>
+  </section>
+  <section class="turn assistant">
+    <div class="role">Codex</div>
+    <div class="body">
+      <p>诊断结论：</p>
+      <ul>
+        <li>BRIR 是脉冲响应，不是语音，直接听本来就很短，不像连续声音。</li>
+        <li>用户提供的 <code>binaural(1).wav</code> 经检查不是全零，但电平很低：</li>
+      </ul>
+      <pre>采样率: 24000 Hz
+通道数: 2
+长度: 0.305 秒
+左声道 peak: 0.005887
+右声道 peak: 0.011076
+整体 peak: 0.011076
+整体 RMS: 0.000235
+peak 约 -38 dBFS
+RMS 约 -65 dBFS</pre>
+      <p>因此问题是 BRIR 输出幅度太低或使用了旧文件，没有被归一化到 0.95。</p>
+      <p>已做改动：</p>
+      <ul>
+        <li><code>03_generate_binaural_rirs.py</code> 默认 <code>NORMALIZE_PEAK = True</code>。</li>
+        <li>新增 <code>peak_after_normalize</code>、<code>rms_after_normalize</code> metadata。</li>
+        <li>新增 <code>binaural_audition.wav</code>，用于试听 BRIR 的 impulse 响应，默认写成 <code>PCM_16</code>。</li>
+        <li><code>04_generate_ears_stereo_audio_train_test.py</code> 默认按 input binaural 峰值归一化，避免 input 被 target WXYZ 压得太小。</li>
+      </ul>
+      <p>建议重跑：</p>
+      <pre>python tau_srir_pipeline/03_generate_binaural_rirs.py --overwrite --normalize_peak
+python tau_srir_pipeline/04_generate_ears_stereo_audio_train_test.py --overwrite</pre>
+    </div>
+  </section>
+
+  <section class="turn user">
+    <div class="role">用户</div>
+    <div class="body">现在的 TAU-SRIR 有没有归一化？现在的 HRTF 有没有归一化？为啥现在声音听起来特别小，基本听不到 BRIR？</div>
+  </section>
+  <section class="turn assistant">
+    <div class="role">Codex</div>
+    <div class="body">
+      <p>TAU-SRIR FOA RIR：第 02 步默认归一化，<code>NORMALIZE_PEAK=True</code>，四个通道共享一个 gain，不单独归一化每个通道。</p>
+      <p>HRTF/HRIR：没有单独归一化。代码直接读取 SOFA <code>Data.IR</code>，用它生成 FOA-to-binaural filters，然后对生成出来的 BRIR 结果做归一化。这样避免破坏 HRTF 的左右耳相对幅度、频谱和方向线索。</p>
+      <p>声音小的原因：用户检查的 BRIR 文件 peak 只有约 0.011，说明很可能是旧文件、没覆盖生成、或听的不是新生成文件。</p>
+    </div>
+  </section>
+
+  <section class="turn user">
+    <div class="role">用户</div>
+    <div class="body">现在为啥 FOA RIR 都听不到声音，是没做归一化吗？</div>
+  </section>
+  <section class="turn assistant">
+    <div class="role">Codex</div>
+    <div class="body">
+      <p>解释：FOA RIR 和 BRIR 一样也是脉冲响应，直接播放 <code>W.wav/X.wav/Y.wav/Z.wav</code> 不会像语音一样有持续声音。</p>
+      <p>已开始修改第 02 步以生成试听文件 <code>foa_audition.wav</code>：把 FOA RIR 解码成双声道并归一化到可试听电平。用户随后中断该回合，因此最后的语法检查未完成。</p>
+    </div>
+  </section>
+
+  <h2>9. 本次最后请求</h2>
+  <section class="turn user">
+    <div class="role">用户</div>
+    <div class="body">把以上的聊天记录保存为 HTML 文件。</div>
+  </section>
+  <section class="turn assistant">
+    <div class="role">Codex</div>
+    <div class="body">
+      <p>已生成本文件：</p>
+      <pre>chat_record.html</pre>
+    </div>
+  </section>
+
+</main>
+</body>
+</html>
