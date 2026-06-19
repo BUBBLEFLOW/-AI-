@@ -1,0 +1,482 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2026-06-19 对话记录 - Stereo to FOA WXYZ</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8fa;
+      --paper: #ffffff;
+      --text: #18202a;
+      --muted: #667085;
+      --border: #d9dee7;
+      --accent: #1d4ed8;
+      --assistant: #eef4ff;
+      --user: #f4f7f4;
+      --code: #111827;
+      --code-bg: #f3f4f6;
+    }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+      line-height: 1.58;
+    }
+    main {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 32px 18px 56px;
+    }
+    header {
+      background: var(--paper);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 24px;
+      margin-bottom: 18px;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 26px;
+      line-height: 1.25;
+    }
+    h2 {
+      margin: 28px 0 10px;
+      font-size: 19px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 6px;
+    }
+    h3 {
+      margin: 22px 0 8px;
+      font-size: 16px;
+    }
+    .meta {
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .card {
+      background: var(--paper);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 18px 20px;
+      margin: 14px 0;
+    }
+    .turn {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 16px;
+      margin: 12px 0;
+      background: var(--paper);
+    }
+    .turn.user {
+      background: var(--user);
+    }
+    .turn.assistant {
+      background: var(--assistant);
+    }
+    .speaker {
+      font-weight: 700;
+      color: var(--accent);
+      margin-bottom: 6px;
+    }
+    ul {
+      padding-left: 22px;
+    }
+    code {
+      background: var(--code-bg);
+      color: var(--code);
+      padding: 1px 4px;
+      border-radius: 4px;
+      font-family: Consolas, "SFMono-Regular", monospace;
+      font-size: 0.94em;
+    }
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      overflow-x: auto;
+      white-space: pre-wrap;
+    }
+    pre code {
+      background: transparent;
+      padding: 0;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 10px 0;
+      background: var(--paper);
+    }
+    th, td {
+      border: 1px solid var(--border);
+      padding: 8px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #f8fafc;
+    }
+    .note {
+      color: var(--muted);
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>2026-06-19 对话记录</h1>
+    <div class="meta">主题：DiffStereo stereo-to-FOA WXYZ 训练、waveform correlation、数据对齐与代码修改</div>
+    <div class="meta">工作目录：C:\Users\25637\Desktop\DiffStereo-main___stereo_WXYZ___FM0617</div>
+  </header>
+
+  <section class="card">
+    <h2>总体结论</h2>
+    <ul>
+      <li>早期训练中 <code>FOA 通道相关性统计</code> 偏乐观，不能代表完整采样后的 waveform correlation。</li>
+      <li><code>Test waveform WXYZ correlation</code> 才是当前判断完整生成质量的主要指标。</li>
+      <li>数据量从少量扩到约 6000 后，如果相关性仍低，主要问题不再只是数据量，而是采样目标、时间对齐、任务可逆性和训练稳定性。</li>
+      <li>数据生成脚本已经修改为默认进行 RIR direct-path 对齐，并进一步用 stereo mid 与 FOA W 做 pair-level 残余对齐。</li>
+      <li>当前 Epoch 3 的 waveform correlation 很低，说明完整采样还没学起来，但 epoch 太早，不能直接判定失败。</li>
+    </ul>
+  </section>
+
+  <section class="card">
+    <h2>已修改文件</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>文件</th>
+          <th>修改内容</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>config/train_stereo_foa.yaml</code></td>
+          <td>
+            新增/调整测试相关性参数：<code>test_correlation_sampling_steps: 200</code>、
+            <code>test_correlation_samples: 20</code>、<code>test_correlation_split: "train"</code>。
+            将 <code>stereo_consistency_weight</code> 改为 <code>0.0</code>。
+          </td>
+        </tr>
+        <tr>
+          <td><code>train_spec.py</code></td>
+          <td>
+            让 <code>cond_fusion</code>、<code>sample_solver</code>、<code>aux_channel_mode</code>
+            从配置中真正生效。
+          </td>
+        </tr>
+        <tr>
+          <td><code>train_spec_ddp.py</code></td>
+          <td>
+            同步单卡脚本的配置生效逻辑，保证 DDP 多卡训练行为一致。
+          </td>
+        </tr>
+        <tr>
+          <td><code>tools/check_foa_alignment.py</code></td>
+          <td>
+            新增数据对齐诊断脚本，用于检查 stereo/FOA 文件配对、采样率、长度、通道数，以及零延迟和允许平移后的相关性。
+          </td>
+        </tr>
+        <tr>
+          <td><code>tools/generate_stereo_foa_dataset.py</code></td>
+          <td>
+            修改数据生成逻辑：<code>--overwrite</code> 会清理旧 wav；默认按 RIR direct path 对齐；
+            默认再用 stereo mid 与 FOA W 做小范围 pair-level 对齐，并记录到 metadata。
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2>关键配置状态</h2>
+    <pre><code>test_correlation_sampling_steps: 200
+test_correlation_samples: 20
+test_correlation_split: "train"
+cond_fusion: "adaln_add"
+spec_scale: 20.0
+residual_learning: false
+stereo_consistency_weight: 0.0
+aux_channel_mode: "all"
+sample_solver: "heun"
+checkpoint_dir: 'checkpoints_stereo_foa_wxyz_condfusion'</code></pre>
+    <p class="note">说明：用户要求不修改 <code>checkpoint_dir</code>，所以该项保持原值。</p>
+  </section>
+
+  <section class="card">
+    <h2>时间线记录</h2>
+
+    <div class="turn user">
+      <div class="speaker">用户</div>
+      <p>给出 5 个样本的 Test waveform WXYZ correlation，均值接近 0，询问“这正常吗”。</p>
+      <pre><code>Mean: W=0.017 X=0.002 Y=0.005 Z=0.003</code></pre>
+    </div>
+    <div class="turn assistant">
+      <div class="speaker">Codex</div>
+      <p>检查代码中 correlation 的定义，确认该指标是逐通道预测波形与目标波形的相关性。按项目阈值低于 0.35 属于很差，因此接近 0 不正常，除非是随机权重或训练刚开始。</p>
+    </div>
+
+    <div class="turn user">
+      <div class="speaker">用户</div>
+      <p>给出 Epoch 32 的训练日志。训练里的 FOA 相关性约 0.75，但 Test waveform 均值仍低。</p>
+      <pre><code>FOA 通道相关性统计：
+W=0.757 X=0.752 Y=0.771 Z=0.784
+Test waveform Mean: W=0.174 X=0.047 Y=0.133 Z=0.050</code></pre>
+    </div>
+    <div class="turn assistant">
+      <div class="speaker">Codex</div>
+      <p>判断训练开始有效，但完整采样后的 waveform 仍很差。指出训练指标和完整采样指标存在落差，可能来自采样过程、尺度、通道、数据配对或训练尚早。</p>
+    </div>
+
+    <div class="turn user">
+      <div class="speaker">用户</div>
+      <p>说明训练了两千轮还是这样。</p>
+    </div>
+    <div class="turn assistant">
+      <div class="speaker">Codex</div>
+      <p>排查训练脚本，发现训练中的 FOA correlation 是基于 <code>reconstruct_x0_from_flow</code> 的一步重建，而 Test waveform 是完整 <code>p_sample_loop</code> 采样后再 iSTFT，二者不等价。</p>
+      <p>进一步做基线测试，发现“模型输出全 0”的情况下，训练相关性指标也可能虚高，因此该指标不能证明完整生成学好了。</p>
+    </div>
+
+    <div class="turn user">
+      <div class="speaker">用户</div>
+      <p>询问如何改进以提升 test waveform correlation。</p>
+    </div>
+    <div class="turn assistant">
+      <div class="speaker">Codex</div>
+      <p>建议先扩大数据量、降低目标尺度、统一测试采样步数，并优先看完整采样 waveform correlation。</p>
+      <pre><code>test_correlation_sampling_steps: 200
+test_correlation_samples: 20
+spec_scale: 20.0</code></pre>
+    </div>
+
+    <div class="turn user">
+      <div class="speaker">用户</div>
+      <p>询问是否主要建议增加数据量。</p>
+    </div>
+    <div class="turn assistant">
+      <div class="speaker">Codex</div>
+      <p>确认数据量是第一优先级，但不是唯一问题。建议至少生成数千条数据，并配合 <code>spec_scale=20</code> 与 200 步测试采样。</p>
+    </div>
+
+    <div class="turn user">
+      <div class="speaker">用户</div>
+      <p>询问 <code>test_correlation_sampling_steps</code> 和 <code>test_correlation_samples</code> 在哪里改。</p>
+    </div>
+    <div class="turn assistant">
+      <div class="speaker">Codex</div>
+      <p>将两个参数加入 <code>config/train_stereo_foa.yaml</code>。后来发现当前配置文件版本中缺少这些顶层参数，于是再次补齐。</p>
+    </div>
+
+    <div class="turn user">
+      <div class="speaker">用户</div>
+      <p>询问项目里现在有哪些必须要改。</p>
+    </div>
+    <div class="turn assistant">
+      <div class="speaker">Codex</div>
+      <p>指出四个必须改的配置生效问题：</p>
+      <ul>
+        <li>顶层 <code>test_correlation_*</code> 参数。</li>
+        <li><code>sample_solver: "heun"</code> 在训练评估中未传入。</li>
+        <li><code>cond_fusion: "adaln_add"</code> 未传给 <code>DiT</code>。</li>
+        <li><code>aux_channel_mode: "all"</code> 未传给辅助 loss。</li>
+      </ul>
+    </div>
+
+    <div class="turn user">
+      <div class="speaker">用户</div>
+      <p>要求“修改前四个”。</p>
+    </div>
+    <div class="turn assistant">
+      <div class="speaker">Codex</div>
+      <p>修改了 <code>config/train_stereo_foa.yaml</code>、<code>train_spec.py</code> 和 <code>train_spec_ddp.py</code>，让四个配置项真正生效，并运行 <code>python -m py_compile train_spec.py train_spec_ddp.py</code> 通过。</p>
+    </div>
+
+    <div class="turn user">
+      <div class="speaker">用户</div>
+      <p>询问“现在修改了哪些部分”。</p>
+    </div>
+    <div class="turn assistant">
+      <div class="speaker">Codex</div>
+      <p>总结修改文件和内容：配置顶层测试参数、单卡和 DDP 脚本中的 <code>sample_solver</code>、<code>cond_fusion</code>、<code>aux_channel_mode</code>。</p>
+    </div>
+
+    <div class="turn user">
+      <div class="speaker">用户</div>
+      <p>询问每次读取的训练数据是否只占 0.1。</p>
+    </div>
+    <div class="turn assistant">
+      <div class="speaker">Codex</div>
+      <p>检查 <code>datasets/__init__.py</code> 和训练脚本后确认：训练集使用的是 <code>config["data"]</code>，没有设置 <code>subset_fraction</code>，所以训练集不是只读 0.1。<code>validation/test</code> 里的 <code>subset_fraction: 0.1</code> 不影响训练集。</p>
+    </div>
+
+    <div class="turn user">
+      <div class="speaker">用户</div>
+      <p>询问“现在是 563 batch 有多少条数据”。</p>
+    </div>
+    <div class="turn assistant">
+      <div class="speaker">Codex</div>
+      <p>按 <code>batch_size: 4</code> 计算，单卡约 <code>563 × 4 = 2252</code> 条；若是 DDP 多卡，需要再乘 GPU 数。</p>
+    </div>
+
+    <div class="turn user">
+      <div class="speaker">用户</div>
+      <p>说明训练集扩大到 6000 后，测试集 waveform correlation 依然上不来。</p>
+    </div>
+    <div class="turn assistant">
+      <div class="speaker">Codex</div>
+      <p>判断数据量不再是唯一瓶颈，建议检查训练集完整采样、数据配对/延迟、旧 checkpoint 污染、以及 <code>stereo_consistency_weight</code> 的错误约束。</p>
+      <p>按用户要求不修改 <code>checkpoint_dir</code>，只把 <code>stereo_consistency_weight</code> 改为 0，并把 <code>test_correlation_split</code> 改为 <code>"train"</code>。</p>
+    </div>
+
+    <div class="turn user">
+      <div class="speaker">用户</div>
+      <p>要求检查数据配对/延迟。</p>
+    </div>
+    <div class="turn assistant">
+      <div class="speaker">Codex</div>
+      <p>新增 <code>tools/check_foa_alignment.py</code>。该脚本检查 stereo/FOA 文件一一配对、采样率、长度、通道数，并计算零延迟相关性和允许平移后的最大相关性。</p>
+      <pre><code>python tools/check_foa_alignment.py --root data/stereo_foa --split train --max_samples 50 --max_lag 4800</code></pre>
+    </div>
+
+    <div class="turn user">
+      <div class="speaker">用户</div>
+      <p>询问数据生成时是否没有对齐，是否需要改数据生成。</p>
+    </div>
+    <div class="turn assistant">
+      <div class="speaker">Codex</div>
+      <p>确认原生成脚本只是卷积后从 0 开始截断，没有做 stereo RIR 和 FOA RIR 的 direct path 对齐。修改 <code>tools/generate_stereo_foa_dataset.py</code>，默认按各自 IR direct path 对齐后截取，并让 <code>--overwrite</code> 清理旧 wav。</p>
+    </div>
+
+    <div class="turn user">
+      <div class="speaker">用户</div>
+      <p>询问现在数据生成是否改了，以及 RIR 本身是否带对齐。</p>
+    </div>
+    <div class="turn assistant">
+      <div class="speaker">Codex</div>
+      <p>说明生成脚本已经默认开启 direct path 对齐。不能假设不同配置的 RIR 本身完全对齐，因此在生成阶段对齐更稳妥。</p>
+    </div>
+
+    <div class="turn user">
+      <div class="speaker">用户</div>
+      <p>询问“应不应该对齐”。</p>
+    </div>
+    <div class="turn assistant">
+      <div class="speaker">Codex</div>
+      <p>回答应该对齐，但要整体对齐 stereo 组和 FOA 组，不要单独移动 W/X/Y/Z，以保留空间关系。</p>
+    </div>
+
+    <div class="turn user">
+      <div class="speaker">用户</div>
+      <p>询问 NIGENS 897 个文件、50 个 Lebedev 位置，这个数据量小不小。</p>
+    </div>
+    <div class="turn assistant">
+      <div class="speaker">Codex</div>
+      <p>计算理论组合 <code>897 × 50 = 44850</code>，认为组合空间不小；6000 条可作为初步训练集，但对 DiT/flow 来说仍是中小规模。</p>
+    </div>
+
+    <div class="turn user">
+      <div class="speaker">用户</div>
+      <p>询问 <code>check_foa_alignment.py</code> 命令是做什么的。</p>
+    </div>
+    <div class="turn assistant">
+      <div class="speaker">Codex</div>
+      <p>解释该命令用于检查 stereo 和 FOA 数据的时间对齐问题，并说明 <code>abs_zero_mean</code>、<code>abs_maxlag_mean</code>、<code>median_lag</code> 的含义。</p>
+    </div>
+
+    <div class="turn user">
+      <div class="speaker">用户</div>
+      <p>贴出对齐检查结果，询问是否对齐。</p>
+      <pre><code>abs_zero_mean ≈ 0.17 ~ 0.34
+abs_maxlag_mean ≈ 0.50 ~ 0.67
+median_lag ≈ -25 ~ -37 samples</code></pre>
+    </div>
+    <div class="turn assistant">
+      <div class="speaker">Codex</div>
+      <p>解释这说明波形层面还不是完全对齐；允许平移后相关性明显提高，存在约 1ms 的残余偏移或 RIR 群延迟差异。</p>
+    </div>
+
+    <div class="turn user">
+      <div class="speaker">用户</div>
+      <p>询问现在数据生成代码是否自带对齐。</p>
+    </div>
+    <div class="turn assistant">
+      <div class="speaker">Codex</div>
+      <p>确认当前生成代码已经默认自带 direct path 对齐，只有显式加 <code>--no_align_ir_delays</code> 才会关闭。</p>
+    </div>
+
+    <div class="turn user">
+      <div class="speaker">用户</div>
+      <p>要求让生成的 stereo 和 FOA 数据集先进行对齐和匹配。</p>
+    </div>
+    <div class="turn assistant">
+      <div class="speaker">Codex</div>
+      <p>在生成脚本中新增 pair-level 残余对齐：先 RIR direct path 对齐，再用 stereo mid 与 FOA W 做小范围互相关，整体平移 FOA WXYZ。默认 <code>--pair_align_max_lag 512</code>，并在 metadata 记录 <code>pair_align_lag</code>。</p>
+    </div>
+
+    <div class="turn user">
+      <div class="speaker">用户</div>
+      <p>询问现在数据集生成方式是不是 <code>stereo mid = (L + R) / sqrt(2)</code> 和 <code>FOA W</code>，还是 clean 分别卷积 stereo IR 和 FOA IR。</p>
+    </div>
+    <div class="turn assistant">
+      <div class="speaker">Codex</div>
+      <p>说明主体生成仍然是同一段 clean 分别卷积 stereo IR 与 FOA IR。<code>stereo mid</code> 和 <code>FOA W</code> 只作为时间对齐参考，不用于合成 FOA。</p>
+    </div>
+
+    <div class="turn user">
+      <div class="speaker">用户</div>
+      <p>询问为什么对齐以后效果还是不好。</p>
+    </div>
+    <div class="turn assistant">
+      <div class="speaker">Codex</div>
+      <p>解释延迟只是一个问题，不是全部问题。可能还有 stereo 到 FOA 信息不足、raw waveform correlation 过严、完整采样没学稳、旧 checkpoint 污染、数据 split 残留等原因。</p>
+    </div>
+
+    <div class="turn user">
+      <div class="speaker">用户</div>
+      <p>贴出 Epoch 3 训练日志，询问是否代表没学到什么。</p>
+      <pre><code>FOA 通道相关性统计：
+W=0.663 X=0.650 Y=0.675 Z=0.675
+Test waveform Mean: W=0.094 X=0.002 Y=0.017 Z=0.013</code></pre>
+    </div>
+    <div class="turn assistant">
+      <div class="speaker">Codex</div>
+      <p>回答从完整采样 waveform correlation 看基本还没学到有效 FOA 生成，但 Epoch 3 太早。W 某些样本已有 0.3 到 0.45，说明链路可能是通的，应继续观察 Epoch 20 到 50 的趋势。</p>
+    </div>
+
+    <div class="turn user">
+      <div class="speaker">用户</div>
+      <p>询问现在还有什么值得改。</p>
+    </div>
+    <div class="turn assistant">
+      <div class="speaker">Codex</div>
+      <p>建议最值得改的是让 <code>weight_decay</code> 和 <code>clip_grad_norm</code> 真正生效。其次继续保持 train waveform 评估，后续可考虑 best checkpoint 按 waveform correlation 保存，以及如果 20 到 50 epoch 后仍低再考虑关闭频谱裁剪。</p>
+    </div>
+
+    <div class="turn user">
+      <div class="speaker">用户</div>
+      <p>询问为什么现在测试的波形相关性很低。</p>
+    </div>
+    <div class="turn assistant">
+      <div class="speaker">Codex</div>
+      <p>总结原因：Epoch 3 太早；训练中的 FOA 相关性是一步重建指标，会偏高；XYZ 比 W 难；raw waveform correlation 对相位和微小延迟敏感；stereo 到 FOA 不是完全确定映射。</p>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>当前推荐下一步</h2>
+    <ol>
+      <li>继续训练观察 Epoch 20、50 的 train waveform correlation 趋势。</li>
+      <li>如果 train waveform 仍低，优先让 <code>weight_decay</code> 和 <code>clip_grad_norm</code> 在训练脚本中生效。</li>
+      <li>使用新生成脚本带 <code>--overwrite</code> 重新生成数据，确保旧 wav 不残留。</li>
+      <li>生成后运行 <code>tools/check_foa_alignment.py</code>，确认 <code>median_lag</code> 更接近 0，<code>abs_zero_mean</code> 接近 <code>abs_maxlag_mean</code>。</li>
+      <li>如果 train waveform 能上来，再把 <code>test_correlation_split</code> 改回 <code>"test"</code> 看泛化。</li>
+    </ol>
+  </section>
+</main>
+</body>
+</html>
