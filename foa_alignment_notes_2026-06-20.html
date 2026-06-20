@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FOA WXYZ 数据生成与对齐说明 - 2026-06-20</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8fa;
+      --panel: #ffffff;
+      --text: #1f2933;
+      --muted: #5f6b7a;
+      --border: #d9dee7;
+      --accent: #2454a6;
+      --code-bg: #eef2f7;
+      --warn-bg: #fff7e6;
+      --warn-border: #e2a63b;
+      --good-bg: #eef8f1;
+      --good-border: #4f9d69;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    main {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 40px 22px 64px;
+    }
+
+    header {
+      margin-bottom: 28px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 20px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 30px;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 30px 0 12px;
+      font-size: 22px;
+      line-height: 1.35;
+    }
+
+    h3 {
+      margin: 22px 0 8px;
+      font-size: 18px;
+    }
+
+    p {
+      margin: 10px 0;
+    }
+
+    .meta {
+      color: var(--muted);
+      margin: 0;
+    }
+
+    section {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px 22px;
+      margin: 18px 0;
+    }
+
+    ul, ol {
+      padding-left: 24px;
+      margin: 10px 0;
+    }
+
+    li {
+      margin: 6px 0;
+    }
+
+    code {
+      background: var(--code-bg);
+      border-radius: 4px;
+      padding: 2px 5px;
+      font-family: Consolas, "SFMono-Regular", Menlo, monospace;
+      font-size: 0.94em;
+    }
+
+    pre {
+      background: var(--code-bg);
+      border-radius: 8px;
+      overflow-x: auto;
+      padding: 14px 16px;
+      margin: 12px 0;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    pre code {
+      background: transparent;
+      padding: 0;
+    }
+
+    .note {
+      border-left: 4px solid var(--accent);
+      padding: 10px 14px;
+      background: #eef4ff;
+      border-radius: 6px;
+      margin: 12px 0;
+    }
+
+    .warn {
+      border-left: 4px solid var(--warn-border);
+      padding: 10px 14px;
+      background: var(--warn-bg);
+      border-radius: 6px;
+      margin: 12px 0;
+    }
+
+    .good {
+      border-left: 4px solid var(--good-border);
+      padding: 10px 14px;
+      background: var(--good-bg);
+      border-radius: 6px;
+      margin: 12px 0;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 14px 0;
+      font-size: 15px;
+    }
+
+    th, td {
+      border: 1px solid var(--border);
+      padding: 9px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #f0f3f8;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>FOA WXYZ 数据生成与对齐说明</h1>
+      <p class="meta">日期：2026-06-20</p>
+      <p class="meta">主题：stereo → FOA WXYZ 数据生成、WXYZ 对齐方式、X/Z 波形相关性低的原因与当前建议</p>
+    </header>
+
+    <section>
+      <h2>1. 数据集生成原理</h2>
+      <p>当前数据集用于训练模型学习从双声道 stereo 条件生成 FOA WXYZ 四通道目标：</p>
+      <pre><code>stereo 2ch -> FOA WXYZ 4ch</code></pre>
+      <p>它不是直接使用真实 stereo/FOA 配对录音，而是用同一个 NIGENS 单声道干声分别与两套房间脉冲响应卷积得到配对数据。</p>
+      <pre><code>NIGENS mono dry audio
+  -> convolve with AB_Omni_40 stereo IR
+  -> stereo condition: L/R
+
+NIGENS mono dry audio
+  -> convolve with Eigen_SPH FOA IR
+  -> FOA target: W/X/Y/Z</code></pre>
+      <p>因为 stereo 和 FOA 来自同一个干声、同一个空间位置的 IR，所以它们构成一组监督训练样本。</p>
+    </section>
+
+    <section>
+      <h2>2. 生成流程</h2>
+      <ol>
+        <li>读取 NIGENS 文件列表，将音频转为 mono。</li>
+        <li>裁剪或补零到固定时长，例如 7 秒。</li>
+        <li>查找匹配的 stereo IR 与 FOA IR，要求 point index、azimuth、elevation 对应。</li>
+        <li>用 stereo IR 卷积得到 L/R。</li>
+        <li>用 FOA IR 卷积得到 WXYZ。</li>
+        <li>把 FOA 原始顺序重排为统一的 WXYZ。</li>
+        <li>做 direct-path 对齐。</li>
+        <li>做 stereo mid 与 FOA W 的整体 pair-level 微调。</li>
+        <li>对 stereo/FOA 成对 peak normalize。</li>
+        <li>写入 train、val、test 目录。</li>
+      </ol>
+      <pre><code>data/stereo_foa/
+  train/
+    stereo/sample_000000.wav
+    foa/sample_000000.wav
+  val/
+    stereo/...
+    foa/...
+  test/
+    stereo/...
+    foa/...</code></pre>
+    </section>
+
+    <section>
+      <h2>3. FOA 通道顺序</h2>
+      <p>脚本当前假设 <code>Eigen_SPH</code> 的一阶通道原始顺序为：</p>
+      <pre><code>W, Y, Z, X</code></pre>
+      <p>然后重排为训练统一使用的：</p>
+      <pre><code>W, X, Y, Z</code></pre>
+      <div class="warn">
+        <strong>需要核对：</strong>如果原始 IR 实际通道顺序或符号约定不同，X/Z 的相关性会明显异常。
+      </div>
+    </section>
+
+    <section>
+      <h2>4. 对齐原则</h2>
+      <h3>推荐方式</h3>
+      <p>推荐使用物理上更合理的整体对齐：</p>
+      <ul>
+        <li>stereo IR：用整体 stereo IR 的 direct path 对齐。</li>
+        <li>FOA IR：W/X/Y/Z 使用一个共享 direct path，对整组 FOA 一起裁剪。</li>
+        <li>pair-level alignment：用 stereo mid 和 FOA W 找 lag，然后把整组 FOA WXYZ 一起平移。</li>
+      </ul>
+      <pre><code>stereo_mid = (L + R) / sqrt(2)
+lag = best_lag(stereo_mid, foa_w)
+FOA_WXYZ = shift_all_channels_together(FOA_WXYZ, lag)</code></pre>
+      <div class="good">
+        <strong>结论：</strong>W 可以作为整体对齐参考，但移动时必须移动整组 WXYZ。
+      </div>
+
+      <h3>不推荐方式</h3>
+      <p>不建议让 W/X/Y/Z 每个通道独立按自己的峰值对齐：</p>
+      <pre><code>W shift a
+X shift b
+Y shift c
+Z shift d</code></pre>
+      <p>FOA 的四个通道共同描述同一个声场，通道间时间与相位关系本身就是空间信息。独立平移会破坏 WXYZ 的物理一致性。</p>
+      <div class="warn">
+        独立通道对齐后出现 Test waveform correlation 接近 0，说明它很可能破坏了 FOA 的空间相位结构。
+      </div>
+    </section>
+
+    <section>
+      <h2>5. W 还有没有必要对齐</h2>
+      <p>有必要，但不是只移动 W，也不是 WXYZ 分别移动。</p>
+      <table>
+        <thead>
+          <tr>
+            <th>做法</th>
+            <th>是否建议</th>
+            <th>原因</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>用 W 和 stereo mid 找整体 lag</td>
+            <td>建议</td>
+            <td>W 最接近整体声压，stereo mid 与 W 最相似。</td>
+          </tr>
+          <tr>
+            <td>找到 lag 后整体移动 WXYZ</td>
+            <td>建议</td>
+            <td>保留 FOA 通道间相位关系。</td>
+          </tr>
+          <tr>
+            <td>只移动 W</td>
+            <td>不建议</td>
+            <td>破坏 W 与 XYZ 的相对关系。</td>
+          </tr>
+          <tr>
+            <td>W/X/Y/Z 各自独立移动</td>
+            <td>不建议</td>
+            <td>破坏 FOA 声场结构，可能导致相关性接近 0。</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>如果担心整体 W 对齐过度，可以比较：</p>
+      <pre><code>pair_align_max_lag = 0
+pair_align_max_lag = 128
+pair_align_max_lag = 512</code></pre>
+      <p>其中 <code>128</code> samples 在 24 kHz 下约为 5.33 ms，通常比 512 更保守。</p>
+    </section>
+
+    <section>
+      <h2>6. 为什么 X/Z 波形相关性低</h2>
+      <p>X/Z 低不一定是单个代码 bug，更像是任务本身欠约束与训练目标共同造成。</p>
+      <ul>
+        <li>Z 是上下方向，普通 AB stereo 基本没有直接观测。</li>
+        <li>X 是前后方向，stereo 中也存在明显前后歧义。</li>
+        <li>W 和 Y 更容易从 stereo mid 与 stereo side 推出来。</li>
+        <li>训练中的 <code>Corr/XZ</code> 是频谱空间、teacher-forced 条件下的相关性。</li>
+        <li><code>TestWaveCorr/XZ</code> 是从随机噪声完整采样后再 iSTFT 的 waveform 相关性，更难。</li>
+        <li>MRSTFT loss 主要约束幅度谱，不能强约束相位、正负号和精确时间对齐。</li>
+      </ul>
+      <p>如果 W/Y 也只有 0.4 左右，说明问题不只是 X/Z 信息缺失，而是整个采样后 waveform 生成链路还没有学稳。</p>
+    </section>
+
+    <section>
+      <h2>7. 当前训练配置建议</h2>
+      <p>已经建议将辅助 loss 从 <code>all</code> 改为 <code>xyz</code>，避免 W 通道主导 waveform/STFT 辅助 loss：</p>
+      <pre><code>aux_channel_mode: "xyz"</code></pre>
+      <p>如果后续 X/Z 仍然偏低，可以考虑提高方向通道与 waveform loss 权重：</p>
+      <pre><code>foa_channel_loss_weights: [1.0, 2.0, 1.0, 3.0]
+xyz_waveform_l1_weight: 0.5
+xyz_mrstft_weight: 0.05</code></pre>
+      <p>注意 <code>foa_channel_loss_weights</code> 会归一化到均值为 1，所以 <code>[3,3,3,3]</code> 实际等价于所有通道同权重。</p>
+    </section>
+
+    <section>
+      <h2>8. MRSTFT 分辨率是否适合 24 kHz</h2>
+      <p>当前配置：</p>
+      <pre><code>xyz_mrstft_resolutions:
+  - [512, 120, 480]
+  - [1024, 300, 1000]</code></pre>
+      <table>
+        <thead>
+          <tr>
+            <th>配置</th>
+            <th>24 kHz 下含义</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>[512, 120, 480]</code></td>
+            <td>窗口 20 ms，hop 5 ms，频率分辨率约 46.9 Hz。</td>
+          </tr>
+          <tr>
+            <td><code>[1024, 300, 1000]</code></td>
+            <td>窗口约 41.7 ms，hop 12.5 ms，频率分辨率约 23.4 Hz。</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>这两组满足 <code>win_length &lt;= n_fft</code>，可以用于 24 kHz。第二组也和主 STFT 参数一致。</p>
+    </section>
+
+    <section>
+      <h2>9. 当前最稳妥的实验路线</h2>
+      <ol>
+        <li>不要使用 W/X/Y/Z 独立通道对齐。</li>
+        <li>使用共享 FOA direct path 对齐。</li>
+        <li>保留用 W 与 stereo mid 做整体 pair-level lag 对齐。</li>
+        <li>先尝试 <code>pair_align_max_lag=128</code> 或与 <code>0</code> 做对照。</li>
+        <li>保留 <code>aux_channel_mode: "xyz"</code>。</li>
+        <li>重新生成数据后，从新的 checkpoint 目录重新训练，不要接着旧 checkpoint 混训。</li>
+      </ol>
+      <div class="note">
+        如果重新生成数据后继续使用旧 checkpoint，模型会面对新的目标分布，TestWaveCorr 可能明显变差。
+      </div>
+    </section>
+  </main>
+</body>
+</html>
