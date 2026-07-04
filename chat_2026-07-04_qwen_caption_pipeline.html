@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2026-07-04 Qwen Caption Pipeline 聊天记录</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8fb;
+      --panel: #ffffff;
+      --text: #1d2633;
+      --muted: #687385;
+      --line: #dfe5ef;
+      --user: #e8f1ff;
+      --assistant: #eef8f0;
+      --code: #f3f5f8;
+      --accent: #2f6fb3;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Microsoft YaHei", "Segoe UI", Arial, sans-serif;
+      line-height: 1.62;
+    }
+
+    main {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 32px 20px 56px;
+    }
+
+    header {
+      padding: 28px 30px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    h1 {
+      margin: 0 0 10px;
+      font-size: 28px;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 30px 0 12px;
+      font-size: 20px;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 22px 0 10px;
+      font-size: 16px;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 8px 0;
+    }
+
+    ul, ol {
+      margin: 8px 0 8px 22px;
+      padding: 0;
+    }
+
+    li {
+      margin: 6px 0;
+    }
+
+    code, pre {
+      font-family: Consolas, "SFMono-Regular", Menlo, monospace;
+    }
+
+    code {
+      padding: 1px 5px;
+      background: var(--code);
+      border-radius: 4px;
+    }
+
+    pre {
+      overflow: auto;
+      padding: 14px 16px;
+      background: var(--code);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      white-space: pre-wrap;
+    }
+
+    .meta {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .section {
+      margin-top: 20px;
+      padding: 24px 30px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    .turn {
+      margin: 12px 0;
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    .turn.user {
+      background: var(--user);
+    }
+
+    .turn.assistant {
+      background: var(--assistant);
+    }
+
+    .speaker {
+      margin-bottom: 6px;
+      font-weight: 700;
+      color: var(--accent);
+    }
+
+    .note {
+      padding: 12px 14px;
+      border-left: 4px solid var(--accent);
+      background: #f4f8fd;
+      border-radius: 6px;
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Qwen Caption Pipeline 聊天记录</h1>
+    <p class="meta">保存日期：2026-07-04</p>
+    <p class="meta">项目路径：<code>C:\Users\TEMP.CXW.001\Desktop\DiffStereo-main（另一个复件）</code></p>
+    <p class="meta">主题：stereo-to-FOA 任务中的训练阶段自动 caption 标注、FOA teacher cue、Qwen 生成字段、GPU 运行。</p>
+  </header>
+
+  <section class="section">
+    <h2>一句话结论</h2>
+    <p>当前最合理的训练标注链路是：已有 FOA WXYZ 作为生成数据集/训练标注输入，DSP 从 FOA 估计粗略空间 cue，Qwen 根据这些 cue 生成自然语言 caption，并可进一步让 Qwen 输出最终的 <code>category</code> 和 <code>direction</code> 字段。</p>
+    <p class="note">这里不是让模型从 stereo 听出前后/上下。前后/上下来自已有 FOA 的 teacher 信息，属于训练阶段数据标注，不应该作为测试/推理时的 oracle 输入。</p>
+  </section>
+
+  <section class="section">
+    <h2>关键问答整理</h2>
+
+    <div class="turn user">
+      <div class="speaker">用户</div>
+      <p>这个项目现在够发 ICASSP 吗？还能加什么创新点？</p>
+    </div>
+    <div class="turn assistant">
+      <div class="speaker">Codex</div>
+      <p>仅做 stereo 到 FOA 上混本身比较容易被认为是工程复现。更有潜力的创新点是引入语义空间 caption，把空间声场生成从纯信号映射扩展到“音频内容 + 粗空间语义”的条件生成。</p>
+    </div>
+
+    <div class="turn user">
+      <div class="speaker">用户</div>
+      <p>如果一旦加了角度，不就直接得到 FOA 了吗？还需要深度学习上混吗？</p>
+    </div>
+    <div class="turn assistant">
+      <div class="speaker">Codex</div>
+      <p>如果直接输入精确角度或完整空间轨迹，确实容易变成信息泄露。比较稳的做法是只用粗粒度、自然语言级别的空间描述，例如 left/right/front/back/above/below，而不是精确方位角和仰角。</p>
+    </div>
+
+    <div class="turn user">
+      <div class="speaker">用户</div>
+      <p>能不能不直接输入语音类别和具体方位，用大模型生成语音类别和粗略方向？</p>
+    </div>
+    <div class="turn assistant">
+      <div class="speaker">Codex</div>
+      <p>可以作为训练阶段自动 caption pipeline。类别可以由音频大模型或已有类别 hint 辅助生成；空间方向可以从 FOA WXYZ 估计 teacher cue，再交给 Qwen 生成自然语言。</p>
+    </div>
+
+    <div class="turn user">
+      <div class="speaker">用户</div>
+      <p>左右可以用信号处理获得，上下和前后大模型能直接从 stereo 中获得吗？</p>
+    </div>
+    <div class="turn assistant">
+      <div class="speaker">Codex</div>
+      <p>仅从普通 stereo 直接判断前后/上下通常不可靠，因为 stereo 缺少稳定的高度和前后歧义消除 cue。训练标注阶段可以利用已有 FOA 的 WXYZ teacher 信息，但推理时不能把这个信息喂给模型。</p>
+    </div>
+
+    <div class="turn user">
+      <div class="speaker">用户</div>
+      <p>根据 stereo 上混到 FOA 的任务，能不能用大模型生成包含空间位置和音频类别的 text，而不是直接从数据集中读取？</p>
+    </div>
+    <div class="turn assistant">
+      <div class="speaker">Codex</div>
+      <p>合理。更准确地说，可以分模块：FOA WXYZ 经过 DSP 估计粗空间位置，类别由 metadata hint 或 Qwen-Audio 估计，最后 Qwen 文本模型把这些 cue 转成自然语言 prompt。</p>
+    </div>
+
+    <div class="turn user">
+      <div class="speaker">用户</div>
+      <p>category 不是 Qwen 生成的，direction 也不是 Qwen 直接生成的。能不能改成这两个都是 Qwen 生成的，并且用 GPU 跑？</p>
+    </div>
+    <div class="turn assistant">
+      <div class="speaker">Codex</div>
+      <p>已修改脚本，新增 <code>--qwen_generate_fields</code>。开启后，Qwen 返回 JSON，里面同时包含 <code>category</code>、<code>category_text</code>、<code>direction</code> 和 <code>prompt</code>。CSV 仍保留 <code>dsp_azimuth</code>、<code>dsp_elevation</code>、<code>left_right</code>、<code>front_back</code>、<code>up_down</code> 等列，用于说明这些字段的 teacher provenance。</p>
+    </div>
+
+    <div class="turn user">
+      <div class="speaker">用户</div>
+      <p>不是从 stereo 听出前后/上下，这个是 dataloader，是生成数据集，输入是 FOA。</p>
+    </div>
+    <div class="turn assistant">
+      <div class="speaker">Codex</div>
+      <p>已纠正：当前 pipeline 是 FOA 输入的训练数据标注流程。空间 teacher cue 从 FOA WXYZ 来，不是从 stereo 推断。可选的 Qwen-Audio 类别估计也改为读取 FOA，优先使用 W 通道作为音频事件内容。</p>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>已做代码修改</h2>
+    <ul>
+      <li>修改文件：<code>tools/generate_qwen_spatial_captions.py</code></li>
+      <li>新增 <code>--qwen_generate_fields</code> 参数。</li>
+      <li>新增 Qwen JSON 输出解析：从 Qwen 输出中解析 <code>category</code>、<code>category_text</code>、<code>direction</code>、<code>prompt</code>。</li>
+      <li>新增方向标签白名单，避免 Qwen 生成不规范空间词。</li>
+      <li>新增 <code>direction_source</code> 列，标记方向字段来源。</li>
+      <li>将可选的 Qwen-Audio 类别估计改为读取 FOA，FOA 文件中优先使用 W 通道。</li>
+      <li>保留 DSP 数值和轴向 cue，方便写论文时说明 teacher cue 的来源。</li>
+    </ul>
+  </section>
+
+  <section class="section">
+    <h2>GPU 环境状态</h2>
+    <ul>
+      <li>新环境：<code>C:\Users\TEMP.CXW.001\qwen_gpu_env</code></li>
+      <li>Python：3.10</li>
+      <li>PyTorch：<code>2.11.0+cu128</code></li>
+      <li>CUDA 检查：<code>torch.cuda.is_available() == True</code></li>
+      <li>GPU：<code>NVIDIA GeForce RTX 5060 Laptop GPU</code></li>
+      <li>显存：约 8 GB</li>
+    </ul>
+  </section>
+
+  <section class="section">
+    <h2>实际运行命令</h2>
+    <pre><code>$env:PATH = 'C:\Users\TEMP.CXW.001\qwen_gpu_env\Library\bin;C:\Users\TEMP.CXW.001\qwen_gpu_env\Scripts;C:\Users\TEMP.CXW.001\qwen_gpu_env;' + $env:PATH
+$env:HF_HOME = (Resolve-Path .\.tools).Path + '\hf_cache'
+$env:TRANSFORMERS_CACHE = $env:HF_HOME
+C:\Users\TEMP.CXW.001\qwen_gpu_env\python.exe tools\generate_qwen_spatial_captions.py --data_root "data/stereo_foa" --caption_backend qwen --qwen_model "Qwen/Qwen2.5-0.5B-Instruct" --output_csv "data/stereo_foa/prompts_qwen.csv" --max_files 15 --qwen_generate_fields</code></pre>
+    <p>运行结果：已写入 <code>data\stereo_foa\prompts_qwen.csv</code>，15 条样本在 GPU 上约 30 秒完成。</p>
+  </section>
+
+  <section class="section">
+    <h2>当前方法的论文表述建议</h2>
+    <p>可以描述为一个 training-time semantic-spatial captioning pipeline：</p>
+    <ol>
+      <li>给定已有 FOA WXYZ 数据。</li>
+      <li>从 WXYZ 估计粗略空间 teacher cue，包括 left/right、front/back、above/below。</li>
+      <li>将事件类别 cue 和空间 cue 输入 Qwen。</li>
+      <li>Qwen 生成结构化字段和自然语言 caption。</li>
+      <li>训练 stereo-to-FOA 模型时使用该 caption 作为文本条件。</li>
+    </ol>
+    <p class="note">需要在论文中明确：FOA teacher cue 只在训练标注阶段使用。测试和真实推理阶段不能从目标 FOA 读取空间信息，否则属于 oracle 信息泄露。</p>
+  </section>
+
+  <section class="section">
+    <h2>剩余注意点</h2>
+    <ul>
+      <li>文本版 Qwen 不会真正“听音频”，它根据给定 cue 生成字段。</li>
+      <li>如果要让类别真正由音频模型识别，需要使用 Qwen-Audio 或其他 audio-language model。</li>
+      <li>当前 <code>direction</code> 是 Qwen 根据 FOA-DSP cue 生成的最终标签，不是 Qwen 从 stereo 推断出来的。</li>
+      <li>如果后续要生成全部 245 条，可以去掉 <code>--max_files 15</code>。</li>
+    </ul>
+  </section>
+</main>
+</body>
+</html>
