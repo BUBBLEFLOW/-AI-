@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Codex 远程 SSH 代理排查记录 - 2026-07-18</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --text: #1f2328;
+      --muted: #667085;
+      --border: #d0d7de;
+      --code-bg: #f0f3f6;
+      --accent: #2563eb;
+      --ok: #047857;
+      --warn: #b45309;
+      --danger: #b91c1c;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0d1117;
+        --panel: #161b22;
+        --text: #e6edf3;
+        --muted: #9da7b3;
+        --border: #30363d;
+        --code-bg: #0d1117;
+        --accent: #58a6ff;
+        --ok: #3fb950;
+        --warn: #d29922;
+        --danger: #f85149;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                   "Hiragino Sans GB", "Microsoft YaHei", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.65;
+    }
+    main {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 32px 20px 64px;
+    }
+    header {
+      margin-bottom: 24px;
+      padding: 28px;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background: var(--panel);
+    }
+    h1, h2, h3 { line-height: 1.3; }
+    h1 { margin: 0 0 8px; font-size: 30px; }
+    h2 { margin-top: 0; font-size: 22px; }
+    h3 { font-size: 18px; }
+    .meta { color: var(--muted); }
+    section {
+      margin: 20px 0;
+      padding: 24px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: var(--panel);
+    }
+    code {
+      font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.12em 0.35em;
+    }
+    pre {
+      overflow-x: auto;
+      padding: 16px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--code-bg);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    pre code {
+      padding: 0;
+      border: 0;
+      background: transparent;
+    }
+    .ok { color: var(--ok); font-weight: 600; }
+    .warn { color: var(--warn); font-weight: 600; }
+    .danger { color: var(--danger); font-weight: 600; }
+    .flow {
+      padding: 16px;
+      border-left: 4px solid var(--accent);
+      background: color-mix(in srgb, var(--accent) 8%, transparent);
+      border-radius: 8px;
+    }
+    ul, ol { padding-left: 24px; }
+    .note {
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .toc a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+    .toc a:hover { text-decoration: underline; }
+    footer {
+      margin-top: 28px;
+      color: var(--muted);
+      font-size: 14px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Codex 远程 SSH 代理排查记录</h1>
+    <div class="meta">整理日期：2026-07-18</div>
+    <p>适用场景：Windows 本地运行 Clash / iKuuuVPN，通过 SSH 连接 AutoDL 远程容器，并让 Codex CLI 访问 OpenAI API。</p>
+  </header>
+
+  <section class="toc">
+    <h2>目录</h2>
+    <ol>
+      <li><a href="#symptoms">问题现象</a></li>
+      <li><a href="#local-proxy">确认 Windows 本地代理</a></li>
+      <li><a href="#ssh-config">SSH 配置</a></li>
+      <li><a href="#reverse-forward">建立反向端口转发</a></li>
+      <li><a href="#remote-proxy">远程服务器设置代理变量</a></li>
+      <li><a href="#codex">启动 Codex</a></li>
+      <li><a href="#quota">Quota exceeded 的含义</a></li>
+      <li><a href="#login">重新登录 Codex</a></li>
+      <li><a href="#other">其他提示</a></li>
+    </ol>
+  </section>
+
+  <section id="symptoms">
+    <h2>1. 问题现象</h2>
+    <p>Codex 启动后反复出现：</p>
+    <pre><code>Reconnecting...
+Request timed out</code></pre>
+    <p>或者：</p>
+    <pre><code>Falling back from WebSockets to HTTPS transport
+Connection refused (os error 111)
+stream disconnected before completion</code></pre>
+    <p>这些通常表示远程服务器无法直接访问 OpenAI，或者 Codex 没有正确使用代理。</p>
+  </section>
+
+  <section id="local-proxy">
+    <h2>2. 确认 Windows 本地代理</h2>
+    <p>已确认本地监听端口：</p>
+    <pre><code>127.0.0.1:7890  HTTP 代理
+7891            SOCKS 代理</code></pre>
+    <p>Windows PowerShell 测试命令：</p>
+    <pre><code>curl.exe -v -x http://127.0.0.1:7890 https://api.openai.com</code></pre>
+    <p>出现以下内容说明本地代理正常：</p>
+    <pre><code>HTTP/1.1 200 Connection established
+Welcome to the OpenAI API!</code></pre>
+    <p class="ok">结论：Windows 本地 Clash 代理工作正常。</p>
+  </section>
+
+  <section id="ssh-config">
+    <h2>3. SSH 配置</h2>
+    <p>配置文件位置：</p>
+    <pre><code>C:\Users\qpyl\.ssh\config</code></pre>
+    <p>配置内容：</p>
+    <pre><code>Host autodl-westb
+  HostName connect.westb.seetacloud.com
+  Port 20661
+  User root
+  RemoteForward 17890 127.0.0.1:7890
+  ExitOnForwardFailure yes
+  ServerAliveInterval 30
+  ServerAliveCountMax 3
+
+Host campus-server
+  HostName 202.116.7.104
+  Port 2230
+  User liuwf
+  RemoteForward 17890 127.0.0.1:7890
+  ExitOnForwardFailure yes
+  ServerAliveInterval 30
+  ServerAliveCountMax 3</code></pre>
+
+    <p>验证 SSH 是否读取到配置：</p>
+    <pre><code>ssh -F "$env:USERPROFILE\.ssh\config" -G autodl-westb |
+  findstr /i "hostname port user remoteforward"</code></pre>
+    <p>正确结果应包含：</p>
+    <pre><code>user root
+hostname connect.westb.seetacloud.com
+port 20661
+remoteforward 17890 [127.0.0.1]:7890</code></pre>
+  </section>
+
+  <section id="reverse-forward">
+    <h2>4. 建立 SSH 反向端口转发</h2>
+    <p>配置含义：</p>
+    <div class="flow">
+      AutoDL 容器 <code>127.0.0.1:17890</code><br>
+      ↓ SSH 隧道<br>
+      Windows 本机 Clash <code>127.0.0.1:7890</code><br>
+      ↓<br>
+      OpenAI API
+    </div>
+
+    <p>Windows PowerShell 中建立连接：</p>
+    <pre><code>ssh autodl-westb</code></pre>
+    <p>排查时可以使用详细日志：</p>
+    <pre><code>ssh -vv autodl-westb</code></pre>
+    <p class="warn">SSH PowerShell 窗口不能关闭，关闭后隧道也会断开。</p>
+
+    <p>远程端测试：</p>
+    <pre><code>curl -v -x http://127.0.0.1:17890 --connect-timeout 10 https://api.openai.com</code></pre>
+    <p>成功标志：</p>
+    <pre><code>Connected to 127.0.0.1 port 17890
+channel 1: connected to 127.0.0.1 port 7890
+HTTP/1.1 200 Connection established
+SSL certificate verify ok
+Welcome to the OpenAI API!</code></pre>
+    <p class="ok">结论：SSH 隧道已经成功打通。</p>
+  </section>
+
+  <section id="remote-proxy">
+    <h2>5. 远程服务器设置代理变量</h2>
+    <p>每次新开 SSH 会话后，先执行：</p>
+    <pre><code>export HTTP_PROXY=http://127.0.0.1:17890
+export HTTPS_PROXY=http://127.0.0.1:17890
+export http_proxy=http://127.0.0.1:17890
+export https_proxy=http://127.0.0.1:17890</code></pre>
+
+    <p>检查：</p>
+    <pre><code>env | grep -i proxy</code></pre>
+
+    <p>不使用 <code>-x</code> 再测试一次：</p>
+    <pre><code>curl -v --connect-timeout 15 https://api.openai.com</code></pre>
+
+    <p>永久保存到 <code>~/.bashrc</code>：</p>
+    <pre><code>cat &gt;&gt; ~/.bashrc &lt;&lt;'EOF'
+export HTTP_PROXY=http://127.0.0.1:17890
+export HTTPS_PROXY=http://127.0.0.1:17890
+export http_proxy=http://127.0.0.1:17890
+export https_proxy=http://127.0.0.1:17890
+EOF
+
+source ~/.bashrc</code></pre>
+  </section>
+
+  <section id="codex">
+    <h2>6. 启动 Codex</h2>
+    <pre><code>cd ~/autodl-tmp/FlowSE-master
+source /root/miniconda3/etc/profile.d/conda.sh
+conda activate flowse
+codex</code></pre>
+
+    <p>也可以在一条命令里显式传入代理：</p>
+    <pre><code>HTTP_PROXY=http://127.0.0.1:17890 HTTPS_PROXY=http://127.0.0.1:17890 http_proxy=http://127.0.0.1:17890 https_proxy=http://127.0.0.1:17890 codex</code></pre>
+
+    <p><code>debug1</code>、<code>debug2</code> 是 <code>ssh -vv</code> 的调试日志，不是 Codex 报错。</p>
+  </section>
+
+  <section id="quota">
+    <h2>7. “Quota exceeded” 的含义</h2>
+    <pre><code>Quota exceeded. Check your plan and billing details.</code></pre>
+    <p>这表示网络已经通了，但当前登录账号的 Codex 配额不可用，常见原因：</p>
+    <ul>
+      <li>Codex 登录的不是购买 Plus 的那个 ChatGPT 账号。</li>
+      <li>Plus 套餐内 Codex 使用额度已经达到当前周期上限。</li>
+      <li>当前使用的是 API Key 登录，API 余额不足或未启用计费。</li>
+    </ul>
+
+    <p><code>Context compacted</code> 只是 Codex 压缩长会话上下文，不是错误。</p>
+  </section>
+
+  <section id="login">
+    <h2>8. 重新登录 Codex</h2>
+    <p>退出当前登录：</p>
+    <pre><code>codex logout</code></pre>
+
+    <p>使用 ChatGPT 账号设备码登录：</p>
+    <pre><code>codex login --device-auth</code></pre>
+
+    <p>然后：</p>
+    <ol>
+      <li>在 Windows 浏览器打开终端显示的网址。</li>
+      <li>登录购买 Plus 的同一个 ChatGPT 账号。</li>
+      <li>输入终端生成的一次性验证码。</li>
+      <li>授权完成后返回终端。</li>
+    </ol>
+
+    <p>检查登录状态：</p>
+    <pre><code>codex login status</code></pre>
+
+    <p class="danger">安全提示：一次性验证码不要发给别人。原对话中出现的验证码已在本文件中脱敏，不予保留。</p>
+  </section>
+
+  <section id="other">
+    <h2>9. 其他提示</h2>
+
+    <h3><code>ss: command not found</code></h3>
+    <p>表示系统未安装 <code>ss</code>，通常由 <code>iproute2</code> 提供：</p>
+    <pre><code>apt-get update
+apt-get install -y iproute2</code></pre>
+
+    <h3><code>bubblewrap</code> 警告</h3>
+    <pre><code>Codex could not find bubblewrap on PATH</code></pre>
+    <p>这只是沙箱依赖警告。Codex 会暂时使用内置 bubblewrap，不是本次联网失败的原因。</p>
+
+    <h3><code>nvidia-smi: No devices were found</code></h3>
+    <p>表示当前容器没有识别到 GPU，与 Codex 代理问题无关。</p>
+
+    <h3>最终检查清单</h3>
+    <ol>
+      <li>Windows 本地 <code>127.0.0.1:7890</code> 可以访问 OpenAI。</li>
+      <li>SSH 使用 <code>autodl-westb</code> 配置连接。</li>
+      <li>远程 <code>127.0.0.1:17890</code> 能通过隧道访问本地 <code>7890</code>。</li>
+      <li>远程终端的代理环境变量存在。</li>
+      <li>Codex 登录的是购买 Plus 的同一个 ChatGPT 账号。</li>
+    </ol>
+  </section>
+
+  <footer>
+    本文件根据当前对话整理生成 · 2026-07-18
+  </footer>
+</main>
+</body>
+</html>
